@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ${IMAGE_PREFIX:-ghcr.io/YOUR_GITHUB_USER/uslush}-bot:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/tanat74/uslush}-bot:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
@@ -12,7 +12,7 @@ services:
         condition: service_started
 
   whisper-bridge:
-    image: ${IMAGE_PREFIX:-ghcr.io/YOUR_GITHUB_USER/uslush}-whisper-bridge:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/tanat74/uslush}-whisper-bridge:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "8000:8000"
