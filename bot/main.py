@@ -20,14 +20,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
-WHISPER_BRIDGE_URL = "http://whisper-bridge:8000"
 
 
 def main() -> None:
     config = load_config()
 
     queue = DeduplicationQueue()
-    whisper_client = WhisperClient(WHISPER_BRIDGE_URL)
+    whisper_client = WhisperClient(
+        config.wyoming_host,
+        config.wyoming_port,
+        config.whisper_language,
+    )
     worker_task: asyncio.Task | None = None
 
     async def post_init(app: Application) -> None:

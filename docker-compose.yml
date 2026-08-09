@@ -1,22 +1,12 @@
 services:
   bot:
-    image: ${IMAGE_PREFIX:-ghcr.io/tanat74/uslush}-bot:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAME:-ghcr.io/tanat74/uslush}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - BOT_MODE=${BOT_MODE:-polling}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_PORT=${WEBHOOK_PORT:-8443}
-    depends_on:
-      whisper-bridge:
-        condition: service_started
-
-  whisper-bridge:
-    image: ${IMAGE_PREFIX:-ghcr.io/tanat74/uslush}-whisper-bridge:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
       - WYOMING_HOST=${WYOMING_HOST:-192.168.88.12}
       - WYOMING_PORT=${WYOMING_PORT:-10305}
       - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-ru}

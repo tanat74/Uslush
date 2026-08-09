@@ -15,6 +15,9 @@ class Config:
     bot_mode: str         # BOT_MODE: "polling" | "webhook" (default: "polling")
     webhook_url: str      # WEBHOOK_URL (required when bot_mode="webhook")
     webhook_port: int     # WEBHOOK_PORT (default: 8443)
+    wyoming_host: str     # WYOMING_HOST (default: 192.168.88.12)
+    wyoming_port: int     # WYOMING_PORT (default: 10305)
+    whisper_language: str # WHISPER_LANGUAGE (default: ru)
 
 
 def load_config() -> Config:
@@ -51,9 +54,24 @@ def load_config() -> Config:
         )
         raise SystemExit(1)
 
+    wyoming_host = os.environ.get("WYOMING_HOST", "192.168.88.12").strip()
+    wyoming_port_str = os.environ.get("WYOMING_PORT", "10305").strip()
+    try:
+        wyoming_port = int(wyoming_port_str)
+    except ValueError:
+        print(
+            f"ERROR: WYOMING_PORT must be an integer, got: {wyoming_port_str!r}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    whisper_language = os.environ.get("WHISPER_LANGUAGE", "ru").strip()
+
     return Config(
         bot_token=bot_token,
         bot_mode=bot_mode,
         webhook_url=webhook_url,
         webhook_port=webhook_port,
+        wyoming_host=wyoming_host,
+        wyoming_port=wyoming_port,
+        whisper_language=whisper_language,
     )

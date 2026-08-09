@@ -31,6 +31,30 @@ def test_load_config_success(monkeypatch):
 
     assert isinstance(cfg, Config)
     assert cfg.bot_token == "test-token-123"
+    assert cfg.wyoming_host == "192.168.88.12"
+    assert cfg.wyoming_port == 10305
+    assert cfg.whisper_language == "ru"
+
+
+def test_load_config_custom_wyoming(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "test-token-123")
+    monkeypatch.setenv("WYOMING_HOST", "wyoming.example")
+    monkeypatch.setenv("WYOMING_PORT", "12000")
+    monkeypatch.setenv("WHISPER_LANGUAGE", "en")
+
+    cfg = load_config()
+
+    assert cfg.wyoming_host == "wyoming.example"
+    assert cfg.wyoming_port == 12000
+    assert cfg.whisper_language == "en"
+
+
+def test_load_config_invalid_wyoming_port(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "test-token-123")
+    monkeypatch.setenv("WYOMING_PORT", "not-a-number")
+
+    with pytest.raises(SystemExit):
+        load_config()
 
 
 def test_load_config_default_bot_mode(monkeypatch):
