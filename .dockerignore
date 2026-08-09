@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+.env
+.env.*
+.gitignore
+.kiro
+.agents
+.codex
+tests
+Example
+**/__pycache__
+**/*.pyc

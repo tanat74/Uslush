@@ -1,0 +1,6 @@
+services:
+  bot:
+    build: .
+
+  whisper-bridge:
+    build: ./whisper_service
