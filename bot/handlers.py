@@ -2,57 +2,88 @@
 
 import logging
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from bot.queue import DeduplicationQueue, TranscriptionTask
 
 logger = logging.getLogger(__name__)
 
+# Telegram Bot API getFile rejects downloads above 20 MB.
+TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024
+MSG_FILE_TOO_BIG = "Файл больше 20 МБ, сожмите или обрежьте."
 
-async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming voice message."""
+
+def _is_too_big(file_size: int | None) -> bool:
+    return file_size is not None and file_size > TELEGRAM_DOWNLOAD_LIMIT
+
+
+async def _enqueue(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    file_id: str,
+    file_size: int | None,
+    media_type: str,
+) -> None:
+    """Reject oversized media, otherwise put a transcription task on the queue."""
+    msg: Message = update.effective_message
+    if _is_too_big(file_size):
+        await msg.reply_text(MSG_FILE_TOO_BIG)
+        logger.info(
+            "Rejected %s for user %s: %s bytes exceeds Bot API download limit",
+            media_type,
+            update.effective_user.id,
+            file_size,
+        )
+        return
+
     queue: DeduplicationQueue = context.bot_data["queue"]
-    msg = update.effective_message
     task = TranscriptionTask(
         user_id=update.effective_user.id,
         chat_id=update.effective_chat.id,
-        file_id=msg.voice.file_id,
-        media_type="voice",
+        file_id=file_id,
+        media_type=media_type,
         message_id=msg.message_id,
     )
     await queue.put(task)
-    logger.debug("Queued voice task for user %s", task.user_id)
+    logger.debug("Queued %s task for user %s", media_type, task.user_id)
+
+
+async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming voice message."""
+    voice = update.effective_message.voice
+    await _enqueue(
+        update,
+        context,
+        file_id=voice.file_id,
+        file_size=voice.file_size,
+        media_type="voice",
+    )
 
 
 async def _handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming video note (circle video)."""
-    queue: DeduplicationQueue = context.bot_data["queue"]
-    msg = update.effective_message
-    task = TranscriptionTask(
-        user_id=update.effective_user.id,
-        chat_id=update.effective_chat.id,
-        file_id=msg.video_note.file_id,
+    video_note = update.effective_message.video_note
+    await _enqueue(
+        update,
+        context,
+        file_id=video_note.file_id,
+        file_size=video_note.file_size,
         media_type="video_note",
-        message_id=msg.message_id,
     )
-    await queue.put(task)
-    logger.debug("Queued video_note task for user %s", task.user_id)
 
 
 async def _handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming video message."""
-    queue: DeduplicationQueue = context.bot_data["queue"]
-    msg = update.effective_message
-    task = TranscriptionTask(
-        user_id=update.effective_user.id,
-        chat_id=update.effective_chat.id,
-        file_id=msg.video.file_id,
+    video = update.effective_message.video
+    await _enqueue(
+        update,
+        context,
+        file_id=video.file_id,
+        file_size=video.file_size,
         media_type="video",
-        message_id=msg.message_id,
     )
-    await queue.put(task)
-    logger.debug("Queued video task for user %s", task.user_id)
 
 
 def register_handlers(application: Application, queue: DeduplicationQueue) -> None:
