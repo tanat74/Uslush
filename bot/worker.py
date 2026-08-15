@@ -4,12 +4,13 @@ import asyncio
 import logging
 
 from bot.queue import DeduplicationQueue
-from bot.whisper import WhisperClient
+from bot.whisper import AudioTooLongError, WhisperClient
 
 logger = logging.getLogger(__name__)
 
 MSG_EMPTY = "Речь не распознана."
 MSG_ERROR = "Ошибка при транскрипции. Попробуйте ещё раз."
+MSG_TOO_LONG = "Файл слишком длинный для распознавания."
 TELEGRAM_MESSAGE_LIMIT = 4096
 
 
@@ -78,6 +79,17 @@ async def run_worker(
 
             except asyncio.CancelledError:
                 raise  # propagate to outer try
+
+            except AudioTooLongError as exc:
+                logger.warning("Audio too long for user %s: %s", task.user_id, exc)
+                try:
+                    await bot.send_message(
+                        chat_id=task.chat_id,
+                        text=MSG_TOO_LONG,
+                        reply_to_message_id=task.message_id,
+                    )
+                except Exception:
+                    pass  # best-effort reply
 
             except Exception as exc:
                 logger.error(

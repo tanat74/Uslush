@@ -6,12 +6,12 @@ descriptive error message if required variables are missing.
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class Config:
-    bot_token: str        # BOT_TOKEN (required)
+    bot_token: str = field(repr=False)  # BOT_TOKEN (required); omitted from repr/logs
     bot_mode: str         # BOT_MODE: "polling" | "webhook" (default: "polling")
     webhook_url: str      # WEBHOOK_URL (required when bot_mode="webhook")
     webhook_port: int     # WEBHOOK_PORT (default: 8443)

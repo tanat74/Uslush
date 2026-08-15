@@ -6,7 +6,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot.queue import DeduplicationQueue, TranscriptionTask
-from bot.worker import MSG_EMPTY, MSG_ERROR, TELEGRAM_MESSAGE_LIMIT, run_worker, split_message
+from bot.whisper import AudioTooLongError
+from bot.worker import (
+    MSG_EMPTY,
+    MSG_ERROR,
+    MSG_TOO_LONG,
+    TELEGRAM_MESSAGE_LIMIT,
+    run_worker,
+    split_message,
+)
 
 
 def make_task(user_id: int = 1, chat_id: int = 100, file_id: str = "fid") -> TranscriptionTask:
@@ -166,4 +174,27 @@ async def test_worker_sends_error_on_transcribe_failure():
 
     bot.send_message.assert_awaited_once_with(
         chat_id=100, text=MSG_ERROR, reply_to_message_id=1
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_sends_too_long_message_on_long_audio_failure():
+    queue = DeduplicationQueue()
+    task = make_task()
+
+    tg_file = AsyncMock()
+    tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"audio"))
+
+    bot = AsyncMock()
+    bot.get_file = AsyncMock(return_value=tg_file)
+    bot.send_message = AsyncMock()
+
+    whisper = AsyncMock()
+    whisper.transcribe = AsyncMock(side_effect=AudioTooLongError("too long"))
+
+    await queue.put(task)
+    await run_worker_once(queue, whisper, bot)
+
+    bot.send_message.assert_awaited_once_with(
+        chat_id=100, text=MSG_TOO_LONG, reply_to_message_id=1
     )

@@ -4,7 +4,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bot.whisper import WhisperClient
+from bot.whisper import (
+    MAX_AUDIO_SEC,
+    PCM_CHANNELS,
+    PCM_RATE,
+    PCM_WIDTH,
+    AudioTooLongError,
+    WhisperClient,
+)
+
+
+def pcm_bytes(duration_sec: float) -> bytes:
+    return bytes(int(duration_sec * PCM_RATE * PCM_WIDTH * PCM_CHANNELS))
 
 
 @pytest.fixture
@@ -50,3 +61,31 @@ async def test_ffmpeg_error_is_reported(client: WhisperClient, monkeypatch):
 
     with pytest.raises(RuntimeError, match="ffmpeg error: invalid input"):
         await client._decode_to_pcm(b"broken-media")
+
+
+@pytest.mark.asyncio
+async def test_transcribe_maps_long_audio_failure(client: WhisperClient, monkeypatch):
+    long_pcm = pcm_bytes(MAX_AUDIO_SEC + 1)
+    monkeypatch.setattr(client, "_decode_to_pcm", AsyncMock(return_value=long_pcm))
+    monkeypatch.setattr(
+        client,
+        "_transcribe_via_wyoming",
+        AsyncMock(side_effect=RuntimeError("connection closed")),
+    )
+
+    with pytest.raises(AudioTooLongError):
+        await client.transcribe(b"media", "video")
+
+
+@pytest.mark.asyncio
+async def test_transcribe_keeps_error_for_short_audio(client: WhisperClient, monkeypatch):
+    short_pcm = pcm_bytes(10)
+    monkeypatch.setattr(client, "_decode_to_pcm", AsyncMock(return_value=short_pcm))
+    monkeypatch.setattr(
+        client,
+        "_transcribe_via_wyoming",
+        AsyncMock(side_effect=RuntimeError("connection closed")),
+    )
+
+    with pytest.raises(RuntimeError, match="connection closed"):
+        await client.transcribe(b"media", "voice")

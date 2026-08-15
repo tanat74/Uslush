@@ -31,6 +31,7 @@ def test_load_config_success(monkeypatch):
 
     assert isinstance(cfg, Config)
     assert cfg.bot_token == "test-token-123"
+    assert "test-token-123" not in repr(cfg)
     assert cfg.wyoming_host == "192.168.88.12"
     assert cfg.wyoming_port == 10305
     assert cfg.whisper_language == "ru"

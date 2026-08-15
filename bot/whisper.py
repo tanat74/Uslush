@@ -14,6 +14,17 @@ PCM_RATE = 16000
 PCM_WIDTH = 2
 PCM_CHANNELS = 1
 CHUNK_SIZE = 3200
+MAX_AUDIO_SEC = 180.0
+
+
+class AudioTooLongError(RuntimeError):
+    """Raised when ASR fails and the decoded audio exceeds the safe length."""
+
+
+def pcm_duration_sec(pcm_data: bytes) -> float:
+    """Return decoded PCM duration in seconds."""
+    frame_bytes = PCM_RATE * PCM_WIDTH * PCM_CHANNELS
+    return len(pcm_data) / frame_bytes
 
 
 class WhisperClient:
@@ -32,7 +43,16 @@ class WhisperClient:
         pcm_data = await self._decode_to_pcm(audio_bytes)
         if not pcm_data:
             raise RuntimeError("ffmpeg produced no PCM output")
-        return await self._transcribe_via_wyoming(pcm_data)
+        try:
+            return await self._transcribe_via_wyoming(pcm_data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if pcm_duration_sec(pcm_data) > MAX_AUDIO_SEC:
+                raise AudioTooLongError(
+                    "Audio is too long for recognition"
+                ) from exc
+            raise
 
     async def _decode_to_pcm(self, audio_bytes: bytes) -> bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".media") as tmp:
