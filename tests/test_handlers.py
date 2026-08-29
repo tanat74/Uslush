@@ -3,9 +3,12 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from telegram.constants import ChatAction
 
 from bot.handlers import (
+    MSG_ACCESS_DENIED,
     MSG_FILE_TOO_BIG,
+    MSG_REPLACED,
     TELEGRAM_DOWNLOAD_LIMIT,
     _handle_video,
     _handle_video_note,
@@ -15,7 +18,7 @@ from bot.queue import DeduplicationQueue
 
 
 def make_update(
-    user_id: int,
+    user_id: int | None,
     chat_id: int,
     file_id: str,
     media_type: str,
@@ -23,7 +26,10 @@ def make_update(
 ):
     """Build a minimal mock Update object for a given media type."""
     update = MagicMock()
-    update.effective_user.id = user_id
+    if user_id is None:
+        update.effective_user = None
+    else:
+        update.effective_user.id = user_id
     update.effective_chat.id = chat_id
     update.effective_message.message_id = 42
     update.effective_message.reply_text = AsyncMock()
@@ -41,10 +47,11 @@ def make_update(
     return update
 
 
-def make_context(queue: DeduplicationQueue):
+def make_context(queue: DeduplicationQueue, allowed_user_ids: frozenset[int] = frozenset()):
     """Build a minimal mock Context with bot_data containing the queue."""
     context = MagicMock()
-    context.bot_data = {"queue": queue}
+    context.bot_data = {"queue": queue, "allowed_user_ids": allowed_user_ids}
+    context.bot.send_chat_action = AsyncMock()
     return context
 
 
@@ -67,6 +74,10 @@ async def test_voice_handler_puts_task():
     assert task.file_id == "voice_file_id"
     assert task.user_id == 1
     assert task.chat_id == 100
+    context.bot.send_chat_action.assert_awaited_once_with(
+        chat_id=100, action=ChatAction.TYPING
+    )
+    update.effective_message.reply_text.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +140,7 @@ async def test_video_handler_rejects_file_over_20mb():
 
     assert not queue._deque
     update.effective_message.reply_text.assert_awaited_once_with(MSG_FILE_TOO_BIG)
+    context.bot.send_chat_action.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -205,3 +217,58 @@ async def test_task_has_correct_message_id():
 
     task = await queue.get()
     assert task.message_id == 99
+
+
+@pytest.mark.asyncio
+async def test_voice_handler_notifies_when_previous_task_is_replaced():
+    queue = DeduplicationQueue()
+    context = make_context(queue)
+    first = make_update(user_id=1, chat_id=100, file_id="old", media_type="voice")
+    second = make_update(user_id=1, chat_id=100, file_id="new", media_type="voice")
+
+    await _handle_voice(first, context)
+    await _handle_voice(second, context)
+
+    first.effective_message.reply_text.assert_not_awaited()
+    second.effective_message.reply_text.assert_awaited_once_with(MSG_REPLACED)
+    task = await queue.get()
+    assert task.file_id == "new"
+
+
+@pytest.mark.asyncio
+async def test_voice_handler_rejects_unauthorized_user():
+    queue = DeduplicationQueue()
+    update = make_update(user_id=99, chat_id=100, file_id="voice", media_type="voice")
+    context = make_context(queue, allowed_user_ids=frozenset({1}))
+
+    await _handle_voice(update, context)
+
+    assert not queue._deque
+    update.effective_message.reply_text.assert_awaited_once_with(MSG_ACCESS_DENIED)
+    context.bot.send_chat_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_voice_handler_allows_listed_user():
+    queue = DeduplicationQueue()
+    update = make_update(user_id=1, chat_id=100, file_id="voice", media_type="voice")
+    context = make_context(queue, allowed_user_ids=frozenset({1, 2}))
+
+    await _handle_voice(update, context)
+
+    task = await queue.get()
+    assert task.user_id == 1
+    update.effective_message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_voice_handler_ignores_missing_effective_user():
+    queue = DeduplicationQueue()
+    update = make_update(user_id=None, chat_id=100, file_id="voice", media_type="voice")
+    context = make_context(queue)
+
+    await _handle_voice(update, context)
+
+    assert not queue._deque
+    update.effective_message.reply_text.assert_not_awaited()
+    context.bot.send_chat_action.assert_not_awaited()

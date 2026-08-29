@@ -2,11 +2,20 @@ services:
   bot:
     image: ${IMAGE_NAME:-ghcr.io/tanat74/uslush}:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - BOT_MODE=${BOT_MODE:-polling}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_PORT=${WEBHOOK_PORT:-8443}
-      - WYOMING_HOST=${WYOMING_HOST:-192.168.88.12}
-      - WYOMING_PORT=${WYOMING_PORT:-10305}
+      - WYOMING_HOST=${WYOMING_HOST:?WYOMING_HOST is required}
+      - WYOMING_PORT=${WYOMING_PORT:-10300}
       - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-ru}
+      - POLL_INTERVAL=${POLL_INTERVAL:-60}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS:-}
+      - FFMPEG_TIMEOUT=${FFMPEG_TIMEOUT:-120}
+      - WYOMING_TIMEOUT=${WYOMING_TIMEOUT:-300}

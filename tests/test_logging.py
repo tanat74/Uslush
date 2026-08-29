@@ -70,3 +70,8 @@ def test_install_token_redaction_applies_to_root_logger(monkeypatch):
     output = stream.getvalue()
     assert TOKEN not in output
     assert "[REDACTED]" in output
+
+
+def test_httpx_logger_is_warning():
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

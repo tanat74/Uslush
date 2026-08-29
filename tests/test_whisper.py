@@ -1,6 +1,7 @@
 """Tests for direct ffmpeg/Wyoming transcription client."""
 
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,7 +10,9 @@ from bot.whisper import (
     PCM_CHANNELS,
     PCM_RATE,
     PCM_WIDTH,
+    AsrUnavailableError,
     AudioTooLongError,
+    TranscriptionTimeoutError,
     WhisperClient,
 )
 
@@ -20,7 +23,7 @@ def pcm_bytes(duration_sec: float) -> bytes:
 
 @pytest.fixture
 def client() -> WhisperClient:
-    return WhisperClient("wyoming.local", 10305, "ru")
+    return WhisperClient("wyoming.local", 10300, "ru", ffmpeg_timeout=1.0, wyoming_timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -64,17 +67,16 @@ async def test_ffmpeg_error_is_reported(client: WhisperClient, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_transcribe_maps_long_audio_failure(client: WhisperClient, monkeypatch):
+async def test_transcribe_rejects_long_audio_before_wyoming(client: WhisperClient, monkeypatch):
     long_pcm = pcm_bytes(MAX_AUDIO_SEC + 1)
     monkeypatch.setattr(client, "_decode_to_pcm", AsyncMock(return_value=long_pcm))
-    monkeypatch.setattr(
-        client,
-        "_transcribe_via_wyoming",
-        AsyncMock(side_effect=RuntimeError("connection closed")),
-    )
+    recognize = AsyncMock(return_value="should not be called")
+    monkeypatch.setattr(client, "_transcribe_via_wyoming", recognize)
 
     with pytest.raises(AudioTooLongError):
         await client.transcribe(b"media", "video")
+
+    recognize.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -89,3 +91,51 @@ async def test_transcribe_keeps_error_for_short_audio(client: WhisperClient, mon
 
     with pytest.raises(RuntimeError, match="connection closed"):
         await client.transcribe(b"media", "voice")
+
+
+@pytest.mark.asyncio
+async def test_transcribe_maps_connection_error(client: WhisperClient, monkeypatch):
+    monkeypatch.setattr(client, "_decode_to_pcm", AsyncMock(return_value=pcm_bytes(1)))
+    monkeypatch.setattr(
+        client,
+        "_transcribe_via_wyoming",
+        AsyncMock(side_effect=ConnectionRefusedError("refused")),
+    )
+
+    with pytest.raises(AsrUnavailableError):
+        await client.transcribe(b"media", "voice")
+
+
+@pytest.mark.asyncio
+async def test_wyoming_timeout_raises_transcription_timeout(client: WhisperClient, monkeypatch):
+    async def hang(_pcm):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(client, "_decode_to_pcm", AsyncMock(return_value=pcm_bytes(1)))
+    monkeypatch.setattr(client, "_transcribe_via_wyoming", hang)
+
+    with pytest.raises(TranscriptionTimeoutError, match="Wyoming"):
+        await client.transcribe(b"media", "voice")
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_timeout_kills_process(client: WhisperClient, monkeypatch):
+    process = MagicMock()
+    process.returncode = None
+    calls = {"n": 0}
+
+    async def communicate():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.sleep(10)
+        return b"", b""
+
+    process.communicate = communicate
+    process.kill = MagicMock()
+    create_process = AsyncMock(return_value=process)
+    monkeypatch.setattr("bot.whisper.asyncio.create_subprocess_exec", create_process)
+
+    with pytest.raises(TranscriptionTimeoutError, match="ffmpeg"):
+        await client._decode_to_pcm(b"media")
+
+    process.kill.assert_called_once()

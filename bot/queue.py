@@ -33,36 +33,46 @@ class DeduplicationQueue:
         self._user_index: Dict[int, TranscriptionTask] = {}
         self._lock = asyncio.Lock()
         # asyncio.Queue используется как семафор без ограничения размера.
-        # put() кладёт токен None; get() забирает токен, блокируясь до
-        # появления задачи.
+        # put() кладёт токен None только когда очередь реально выросла;
+        # get() забирает токен, блокируясь до появления задачи.
         self._signal: asyncio.Queue[None] = asyncio.Queue()
 
-    async def put(self, task: TranscriptionTask) -> None:
+    async def put(self, task: TranscriptionTask) -> bool:
         """Добавить задачу в очередь с дедупликацией по user_id.
 
         Если задача от того же user_id уже присутствует, старая
         удаляется из deque и dict, новая добавляется в конец.
+
+        Returns:
+            True, если предыдущая задача того же пользователя была вытеснена.
         """
         async with self._lock:
-            if task.user_id in self._user_index:
+            replaced = task.user_id in self._user_index
+            if replaced:
                 old_task = self._user_index[task.user_id]
                 self._deque.remove(old_task)
             self._deque.append(task)
             self._user_index[task.user_id] = task
-        # Сигнализируем о доступности новой задачи вне lock, чтобы
-        # не создавать лишней конкуренции за блокировку.
-        await self._signal.put(None)
+        # Токен нужен только для новой слот-позиции. При замене размер
+        # очереди не меняется — лишний сигнал разъехался бы со deque.
+        if not replaced:
+            await self._signal.put(None)
+        return replaced
 
     async def get(self) -> TranscriptionTask:
         """Ждать появления задачи и вернуть первую из очереди (FIFO).
 
         Блокируется до тех пор, пока очередь не окажется непустой.
+        Лишние сигнальные токены игнорируются.
         """
-        await self._signal.get()
-        async with self._lock:
-            task = self._deque.popleft()
-            del self._user_index[task.user_id]
-        return task
+        while True:
+            await self._signal.get()
+            async with self._lock:
+                if not self._deque:
+                    continue
+                task = self._deque.popleft()
+                del self._user_index[task.user_id]
+            return task
 
     async def remove_user(self, user_id: int) -> None:
         """Удалить задачу пользователя из очереди (если есть).

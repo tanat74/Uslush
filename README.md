@@ -14,6 +14,7 @@ Telegram-бот принимает голосовые сообщения, вид
 - Декодирование аудио и видео через ffmpeg внутри контейнера бота
 - Прямое подключение к Wyoming/faster-whisper без промежуточного HTTP-сервиса
 - Режимы работы: **polling** (по умолчанию) и **webhook**
+- Опциональный список разрешённых Telegram user ID
 - Один Docker-образ и один контейнер приложения
 
 ## Архитектура
@@ -38,8 +39,8 @@ cp .env.example .env
 
 ```env
 BOT_TOKEN=your-telegram-bot-token
-WYOMING_HOST=192.168.88.12
-WYOMING_PORT=10305
+WYOMING_HOST=wyoming.example
+WYOMING_PORT=10300
 WHISPER_LANGUAGE=ru
 IMAGE_NAME=ghcr.io/YOUR_GITHUB_USER/uslush
 ```
@@ -89,10 +90,14 @@ python -m bot.main
 | Переменная | Обязательная | По умолчанию | Описание |
 |---|---|---|---|
 | `BOT_TOKEN` | Да | — | Токен Telegram-бота от BotFather |
-| `WYOMING_HOST` | Нет | `192.168.88.12` | Хост сервера Wyoming/faster-whisper |
+| `WYOMING_HOST` | Да | — | Хост сервера Wyoming/faster-whisper |
 | `WYOMING_PORT` | Нет | `10300` | TCP-порт Wyoming |
 | `WHISPER_LANGUAGE` | Нет | `ru` | Язык распознавания |
+| `ALLOWED_USER_IDS` | Нет | пусто (все) | Telegram user ID через запятую |
 | `BOT_MODE` | Нет | `polling` | `polling` или `webhook` |
+| `POLL_INTERVAL` | Нет | `60` | Пауза в секундах между запросами `getUpdates` |
+| `FFMPEG_TIMEOUT` | Нет | `120` | Таймаут декодирования ffmpeg, секунды |
+| `WYOMING_TIMEOUT` | Нет | `300` | Таймаут ответа ASR-сервера, секунды |
 | `WEBHOOK_URL` | При webhook | — | Публичный HTTPS URL webhook |
 | `WEBHOOK_PORT` | Нет | `8443` | Локальный порт webhook-сервера |
 
@@ -107,7 +112,7 @@ WEBHOOK_PORT=8443
 ## Тесты
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pytest
 ```
 
@@ -129,11 +134,18 @@ Uslush/
 ├── docker-compose.yml
 ├── docker-compose.build.yml
 ├── requirements.txt
+├── requirements-dev.txt
 └── .env.example
 ```
 
 ## Поведение бота
 
+- После постановки в очередь бот показывает индикатор «печатает»
+- Если новое сообщение вытесняет ещё не обработанное от того же пользователя → «Предыдущее необработанное сообщение заменено этим.»
 - Пустая транскрипция → «Речь не распознана.»
-- Ошибка скачивания или распознавания → «Ошибка при транскрипции. Попробуйте ещё раз.»
+- Файл длиннее 180 секунд → «Файл слишком длинный для распознавания.»
+- Таймаут ffmpeg или ASR → «Распознавание заняло слишком много времени. Попробуйте ещё раз.»
+- ASR-сервер недоступен → «Сервер распознавания недоступен. Попробуйте позже.»
+- Прочая ошибка скачивания или распознавания → «Ошибка при транскрипции. Попробуйте ещё раз.»
+- Пользователь не из `ALLOWED_USER_IDS` → «Доступ запрещён.»
 - Текстовые и прочие сообщения игнорируются

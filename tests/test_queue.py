@@ -25,6 +25,10 @@ def make_task(user_id: int, file_id: str = "file_a") -> TranscriptionTask:
     )
 
 
+def assert_signal_matches_deque(q: DeduplicationQueue) -> None:
+    assert q._signal.qsize() == len(q._deque)
+
+
 # ---------------------------------------------------------------------------
 # 1. Добавление одной задачи — get() возвращает её
 # Validates: Requirement 2.1
@@ -37,10 +41,13 @@ async def test_put_single_task_get_returns_it():
     q = DeduplicationQueue()
     task = make_task(user_id=1)
 
-    await q.put(task)
+    replaced = await q.put(task)
+    assert replaced is False
+    assert_signal_matches_deque(q)
     result = await q.get()
 
     assert result == task
+    assert_signal_matches_deque(q)
 
 
 # ---------------------------------------------------------------------------
@@ -56,12 +63,31 @@ async def test_deduplication_second_task_replaces_first():
     task_old = make_task(user_id=1, file_id="old_file")
     task_new = make_task(user_id=1, file_id="new_file")
 
-    await q.put(task_old)
-    await q.put(task_new)
+    assert await q.put(task_old) is False
+    assert await q.put(task_new) is True
+    assert_signal_matches_deque(q)
+    assert q._signal.qsize() == 1
 
     result = await q.get()
     assert result == task_new
     assert result.file_id == "new_file"
+    assert_signal_matches_deque(q)
+
+
+@pytest.mark.asyncio
+async def test_deduplication_does_not_leave_extra_signal_tokens():
+    """A second get() after replacement must block, not pop an empty deque."""
+    q = DeduplicationQueue()
+    await q.put(make_task(user_id=1, file_id="old_file"))
+    await q.put(make_task(user_id=1, file_id="new_file"))
+
+    first = await q.get()
+    assert first.file_id == "new_file"
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(q.get(), timeout=0.05)
+
+    assert_signal_matches_deque(q)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +107,7 @@ async def test_fifo_order_for_different_users():
     await q.put(task1)
     await q.put(task2)
     await q.put(task3)
+    assert_signal_matches_deque(q)
 
     assert await q.get() == task1
     assert await q.get() == task2
@@ -117,6 +144,21 @@ async def test_get_blocks_until_task_is_available():
     assert results == [task]
 
 
+@pytest.mark.asyncio
+async def test_get_skips_stale_signal_tokens():
+    """get() keeps waiting if a leftover token finds an empty deque."""
+    q = DeduplicationQueue()
+    await q._signal.put(None)
+
+    waiter = asyncio.create_task(q.get())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+
+    expected = make_task(user_id=7, file_id="late")
+    await q.put(expected)
+    assert await waiter == expected
+
+
 # ---------------------------------------------------------------------------
 # 5. remove_user() удаляет задачу; после удаления очередь пуста
 # Validates: Requirement 2.2
@@ -132,8 +174,6 @@ async def test_remove_user_empties_queue():
     await q.put(task)
     await q.remove_user(99)
 
-    # Queue must be empty — get() would block forever, so we check via
-    # the internal signal counter which should be 0.
     assert q._signal.qsize() == 0
     assert len(q._deque) == 0
     assert 99 not in q._user_index
@@ -148,6 +188,5 @@ async def test_remove_user_nonexistent_is_noop():
     await q.put(task)
     await q.remove_user(999)  # user not in queue
 
-    # Original task must still be retrievable
     result = await q.get()
     assert result == task

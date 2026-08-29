@@ -15,10 +15,20 @@ PCM_WIDTH = 2
 PCM_CHANNELS = 1
 CHUNK_SIZE = 3200
 MAX_AUDIO_SEC = 180.0
+DEFAULT_FFMPEG_TIMEOUT = 120.0
+DEFAULT_WYOMING_TIMEOUT = 300.0
 
 
 class AudioTooLongError(RuntimeError):
-    """Raised when ASR fails and the decoded audio exceeds the safe length."""
+    """Raised when decoded audio exceeds the maximum allowed duration."""
+
+
+class TranscriptionTimeoutError(RuntimeError):
+    """Raised when ffmpeg or Wyoming exceeds the configured timeout."""
+
+
+class AsrUnavailableError(RuntimeError):
+    """Raised when the Wyoming ASR server cannot be reached."""
 
 
 def pcm_duration_sec(pcm_data: bytes) -> float:
@@ -30,10 +40,19 @@ def pcm_duration_sec(pcm_data: bytes) -> float:
 class WhisperClient:
     """Decode Telegram media and send it directly to a Wyoming ASR server."""
 
-    def __init__(self, host: str, port: int, language: str = "ru") -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        language: str = "ru",
+        ffmpeg_timeout: float = DEFAULT_FFMPEG_TIMEOUT,
+        wyoming_timeout: float = DEFAULT_WYOMING_TIMEOUT,
+    ) -> None:
         self._host = host
         self._port = port
         self._language = language
+        self._ffmpeg_timeout = ffmpeg_timeout
+        self._wyoming_timeout = wyoming_timeout
 
     async def transcribe(self, audio_bytes: bytes, media_type: str) -> str:
         """Decode audio/video bytes and return text produced by Wyoming."""
@@ -43,16 +62,21 @@ class WhisperClient:
         pcm_data = await self._decode_to_pcm(audio_bytes)
         if not pcm_data:
             raise RuntimeError("ffmpeg produced no PCM output")
+        if pcm_duration_sec(pcm_data) > MAX_AUDIO_SEC:
+            raise AudioTooLongError("Audio is too long for recognition")
         try:
-            return await self._transcribe_via_wyoming(pcm_data)
+            async with asyncio.timeout(self._wyoming_timeout):
+                return await self._transcribe_via_wyoming(pcm_data)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            if pcm_duration_sec(pcm_data) > MAX_AUDIO_SEC:
-                raise AudioTooLongError(
-                    "Audio is too long for recognition"
-                ) from exc
-            raise
+        except TimeoutError as exc:
+            raise TranscriptionTimeoutError(
+                "Wyoming transcription timed out"
+            ) from exc
+        except (OSError, ConnectionError) as exc:
+            raise AsrUnavailableError(
+                "Wyoming server is unavailable"
+            ) from exc
 
     async def _decode_to_pcm(self, audio_bytes: bytes) -> bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".media") as tmp:
@@ -72,7 +96,18 @@ class WhisperClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            pcm_data, stderr = await process.communicate()
+            try:
+                pcm_data, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self._ffmpeg_timeout,
+                )
+            except TimeoutError as exc:
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.communicate(), timeout=5)
+                except Exception:
+                    pass
+                raise TranscriptionTimeoutError("ffmpeg timed out") from exc
             if process.returncode != 0:
                 message = stderr.decode(errors="replace")
                 raise RuntimeError(f"ffmpeg error: {message}")
