@@ -4,18 +4,18 @@ import asyncio
 import logging
 
 from telegram.constants import ChatAction
+from telegram.error import RetryAfter
 
 from bot.queue import DeduplicationQueue, TranscriptionTask
-from bot.whisper import (
-    AsrUnavailableError,
-    AudioTooLongError,
-    TranscriptionTimeoutError,
-    WhisperClient,
-)
+from bot.asr import AsrUnavailableError, Transcriber, TranscriptionTimeoutError
+from bot.whisper import AudioTooLongError
 
 logger = logging.getLogger(__name__)
 
 MSG_EMPTY = "Речь не распознана."
+MSG_START = "Распознаю…"
+MSG_PARTIAL = "Распознавание прервано, показана только часть текста."
+EDIT_INTERVAL = 2.0
 MSG_ERROR = "Ошибка при транскрипции. Попробуйте ещё раз."
 MSG_TOO_LONG = "Файл слишком длинный для распознавания."
 MSG_TIMEOUT = "Распознавание заняло слишком много времени. Попробуйте ещё раз."
@@ -70,34 +70,84 @@ async def _reply(bot, task: TranscriptionTask, text: str) -> None:
         pass  # best-effort reply
 
 
+class ProgressiveReply:
+    """One writer for Telegram; slow edits never block SSE consumption."""
+
+    def __init__(self, bot, task):
+        self.bot = bot
+        self.task = task
+        self.text = ""
+        self.messages = []
+        self.changed = asyncio.Event()
+        self.finished = asyncio.Event()
+
+    def append(self, delta: str):
+        self.text += delta
+        if self.text.strip():
+            self.changed.set()
+
+    def finish(self, text: str):
+        self.text = text
+        self.finished.set()
+        self.changed.set()
+
+    async def render(self, text: str):
+        chunks = split_message(text)
+        for i, chunk in enumerate(chunks):
+            if i == len(self.messages):
+                msg = await self.bot.send_message(chat_id=self.task.chat_id, text=chunk,
+                                                  reply_to_message_id=self.task.message_id)
+                self.messages.append((msg.message_id, chunk))
+            elif self.messages[i][1] != chunk:
+                mid = self.messages[i][0]
+                await self.bot.edit_message_text(chat_id=self.task.chat_id, message_id=mid, text=chunk)
+                self.messages[i] = (mid, chunk)
+        while len(self.messages) > len(chunks):
+            await self.bot.delete_message(chat_id=self.task.chat_id, message_id=self.messages[-1][0])
+            self.messages.pop()
+
+    async def run(self):
+        initial = True
+        while True:
+            if not initial:
+                await self.changed.wait()
+            done = self.finished.is_set() and not initial
+            text = MSG_START if initial else self.text
+            if not initial:
+                self.changed.clear()
+            try:
+                await self.render(text)
+            except RetryAfter as exc:
+                await asyncio.sleep(exc.retry_after)
+                self.changed.set()
+                continue
+            if done:
+                return
+            if not initial:
+                try:
+                    async with asyncio.timeout(EDIT_INTERVAL):
+                        await self.finished.wait()
+                except TimeoutError:
+                    pass
+            initial = False
+
+
 async def run_worker(
     queue: DeduplicationQueue,
-    whisper_client: WhisperClient,
+    client: Transcriber,
     bot,
 ) -> None:
-    """Continuously process transcription tasks from the queue.
-
-    For each task:
-      1. Download the media file from Telegram.
-      2. Send bytes to WhisperClient for transcription.
-      3. Reply to the user in the same chat.
-
-    Stops cleanly on asyncio.CancelledError (e.g. SIGTERM).
-    Any other exception is logged and the loop continues so one bad
-    dequeue or task cannot kill the worker.
-
-    Args:
-        queue: Shared DeduplicationQueue instance.
-        whisper_client: WhisperClient pointing at the Wyoming ASR server.
-        bot: python-telegram-bot Bot instance.
-    """
+    """Download, transcribe and progressively publish each queued recording."""
     logger.info("Worker started")
     try:
         while True:
             task = None
             typing_task: asyncio.Task | None = None
+            writer = None
             try:
                 task = await queue.get()
+                reply = ProgressiveReply(bot, task)
+                writer = asyncio.create_task(reply.run())
                 logger.debug(
                     "Processing task for user %s (media: %s)",
                     task.user_id,
@@ -115,42 +165,28 @@ async def run_worker(
                     name=f"typing-{task.user_id}",
                 )
 
-                tg_file = await bot.get_file(task.file_id)
-                audio_bytes = bytes(await tg_file.download_as_bytearray())
-
-                text = await whisper_client.transcribe(audio_bytes, task.media_type)
-
-                if not text.strip():
-                    text = MSG_EMPTY
-
-                for chunk in split_message(text):
-                    await bot.send_message(
-                        chat_id=task.chat_id,
-                        text=chunk,
-                        reply_to_message_id=task.message_id,
-                    )
+                try:
+                    tg_file = await bot.get_file(task.file_id)
+                    audio_bytes = bytes(await tg_file.download_as_bytearray())
+                    text = await client.transcribe(audio_bytes, task.media_type, reply.append)
+                    result = text if text.strip() else MSG_EMPTY
+                except Exception as exc:
+                    logger.warning("Transcription failed for user %s", task.user_id, exc_info=True)
+                    if reply.text.strip():
+                        result = reply.text + "\n\n" + MSG_PARTIAL
+                    elif isinstance(exc, AudioTooLongError):
+                        result = MSG_TOO_LONG
+                    elif isinstance(exc, TranscriptionTimeoutError):
+                        result = MSG_TIMEOUT
+                    elif isinstance(exc, AsrUnavailableError):
+                        result = MSG_UNAVAILABLE
+                    else:
+                        result = MSG_ERROR
+                reply.finish(result)
+                await writer
 
             except asyncio.CancelledError:
                 raise
-
-            except AudioTooLongError as exc:
-                logger.warning("Audio too long for user %s: %s", task and task.user_id, exc)
-                if task is not None:
-                    await _reply(bot, task, MSG_TOO_LONG)
-
-            except TranscriptionTimeoutError as exc:
-                logger.warning(
-                    "Transcription timed out for user %s: %s",
-                    task and task.user_id,
-                    exc,
-                )
-                if task is not None:
-                    await _reply(bot, task, MSG_TIMEOUT)
-
-            except AsrUnavailableError as exc:
-                logger.error("ASR unavailable for user %s: %s", task and task.user_id, exc)
-                if task is not None:
-                    await _reply(bot, task, MSG_UNAVAILABLE)
 
             except Exception as exc:
                 if task is None:
@@ -165,12 +201,12 @@ async def run_worker(
                     await _reply(bot, task, MSG_ERROR)
 
             finally:
+                if writer is not None and not writer.done():
+                    writer.cancel()
+                    await asyncio.gather(writer, return_exceptions=True)
                 if typing_task is not None:
                     typing_task.cancel()
-                    try:
-                        await typing_task
-                    except asyncio.CancelledError:
-                        pass
+                    await asyncio.gather(typing_task, return_exceptions=True)
 
     except asyncio.CancelledError:
         logger.info("Worker cancelled, shutting down")

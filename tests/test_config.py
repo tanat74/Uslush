@@ -19,6 +19,8 @@ def _apply_base(monkeypatch) -> None:
     for key, value in BASE_ENV.items():
         monkeypatch.setenv(key, value)
     for key in (
+        "ASR_BACKEND",
+        "GIGAAM_BASE_URL",
         "BOT_MODE",
         "WEBHOOK_URL",
         "WEBHOOK_PORT",
@@ -47,12 +49,27 @@ def test_load_config_success(monkeypatch):
     assert cfg.bot_token == "test-token-123"
     assert "test-token-123" not in repr(cfg)
     assert cfg.wyoming_host == "wyoming.example"
+    assert cfg.asr_backend == "wyoming"
     assert cfg.wyoming_port == 10300
     assert cfg.whisper_language == "ru"
     assert cfg.poll_interval == 60.0
     assert cfg.allowed_user_ids == frozenset()
     assert cfg.ffmpeg_timeout == 120.0
     assert cfg.wyoming_timeout == 300.0
+
+
+def test_gigaam_requires_url_but_not_wyoming(monkeypatch):
+    _apply_base(monkeypatch)
+    monkeypatch.setenv("ASR_BACKEND", "gigaam")
+    monkeypatch.delenv("WYOMING_HOST")
+    with pytest.raises(SystemExit):
+        load_config()
+    monkeypatch.setenv("GIGAAM_BASE_URL", "http://asr:8770")
+    monkeypatch.setenv("GIGAAM_API_KEY", "bearer-secret")
+    cfg = load_config()
+    assert cfg.asr_backend == "gigaam"
+    assert cfg.gigaam_base_url == "http://asr:8770"
+    assert "bearer-secret" not in repr(cfg)
 
 
 def test_load_config_custom_wyoming(monkeypatch):

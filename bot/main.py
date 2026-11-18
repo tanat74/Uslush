@@ -15,6 +15,7 @@ from telegram.ext import Application, ApplicationBuilder
 
 from bot.config import load_config
 from bot.handlers import register_handlers
+from bot.gigaam import GigaAMClient
 from bot.queue import DeduplicationQueue
 from bot.whisper import WhisperClient
 from bot.worker import run_worker
@@ -88,20 +89,19 @@ def main() -> None:
     _install_token_redaction(config.bot_token)
 
     queue = DeduplicationQueue()
-    whisper_client = WhisperClient(
-        config.wyoming_host,
-        config.wyoming_port,
-        config.whisper_language,
-        ffmpeg_timeout=config.ffmpeg_timeout,
-        wyoming_timeout=config.wyoming_timeout,
-    )
+    if config.asr_backend == "gigaam":
+        client = GigaAMClient(config.gigaam_base_url, config.gigaam_model,
+                              config.gigaam_api_key, config.gigaam_timeout)
+    else:
+        client = WhisperClient(config.wyoming_host, config.wyoming_port, config.whisper_language,
+                               ffmpeg_timeout=config.ffmpeg_timeout, wyoming_timeout=config.wyoming_timeout)
     worker_task: asyncio.Task | None = None
     heartbeat_task: asyncio.Task | None = None
 
     async def post_init(app: Application) -> None:
         nonlocal worker_task, heartbeat_task
         worker_task = asyncio.create_task(
-            run_worker(queue, whisper_client, app.bot),
+            run_worker(queue, client, app.bot),
             name="transcription_worker",
         )
         worker_task.add_done_callback(_on_worker_done)

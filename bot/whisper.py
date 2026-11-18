@@ -1,6 +1,7 @@
 """Audio decoding and direct transcription through Wyoming."""
 
 import asyncio
+from collections.abc import Callable
 import tempfile
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.client import AsyncTcpClient
 from wyoming.error import Error
+from bot.asr import AsrUnavailableError, TranscriptionTimeoutError
 
 
 PCM_RATE = 16000
@@ -21,14 +23,6 @@ DEFAULT_WYOMING_TIMEOUT = 300.0
 
 class AudioTooLongError(RuntimeError):
     """Raised when decoded audio exceeds the maximum allowed duration."""
-
-
-class TranscriptionTimeoutError(RuntimeError):
-    """Raised when ffmpeg or Wyoming exceeds the configured timeout."""
-
-
-class AsrUnavailableError(RuntimeError):
-    """Raised when the Wyoming ASR server cannot be reached."""
 
 
 def pcm_duration_sec(pcm_data: bytes) -> float:
@@ -54,7 +48,8 @@ class WhisperClient:
         self._ffmpeg_timeout = ffmpeg_timeout
         self._wyoming_timeout = wyoming_timeout
 
-    async def transcribe(self, audio_bytes: bytes, media_type: str) -> str:
+    async def transcribe(self, audio_bytes: bytes, media_type: str,
+                         on_delta: Callable[[str], None] | None = None) -> str:
         """Decode audio/video bytes and return text produced by Wyoming."""
         if not audio_bytes:
             raise RuntimeError("Empty audio file")
