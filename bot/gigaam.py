@@ -28,7 +28,7 @@ class GigaAMClient:
             "video": ("video.mp4", "video/mp4"),
             "video_note": ("video.mp4", "video/mp4"),
             "m4a": ("audio.m4a", "audio/mp4"),
-            "audio": ("audio", "application/octet-stream"),
+            "attachment": ("media", "application/octet-stream"),
         }[media_type]
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

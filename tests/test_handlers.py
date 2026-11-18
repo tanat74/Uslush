@@ -61,8 +61,10 @@ def make_context(queue: DeduplicationQueue, allowed_user_ids: frozenset[int] = f
     ("audio", "запись.m4a", "audio/mp4", "m4a"),
     ("document", "запись.M4A", "application/octet-stream", "m4a"),
     ("document", None, "audio/x-m4a", "m4a"),
-    ("audio", "запись.mp3", "audio/mpeg", "audio"),
-    ("document", "notes.pdf", "application/pdf", None),
+    ("audio", "запись.mp3", "audio/mpeg", "attachment"),
+    ("document", "recording.webm", "application/octet-stream", "attachment"),
+    ("document", None, None, "attachment"),
+    ("document", "notes.pdf", "application/pdf", "attachment"),
 ])
 async def test_audio_attachment(kind, name, mime, expected):
     queue = DeduplicationQueue()
@@ -71,11 +73,8 @@ async def test_audio_attachment(kind, name, mime, expected):
     msg.audio = msg.document = None
     setattr(msg, kind, MagicMock(file_id="recording", file_size=123, file_name=name, mime_type=mime))
     await _handle_audio_file(update, make_context(queue))
-    if expected:
-        task = await queue.get()
-        assert (task.file_id, task.media_type) == ("recording", expected)
-    else:
-        assert not queue._deque
+    task = queue._deque[0]
+    assert (task.file_id, task.media_type) == ("recording", expected)
 
 
 # ---------------------------------------------------------------------------

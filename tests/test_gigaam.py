@@ -6,7 +6,8 @@ from bot.gigaam import GigaAMClient
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("media,filename", [("voice", "voice.ogg"), ("video_note", "video.mp4"),
-                                           ("video", "video.mp4"), ("m4a", "audio.m4a")])
+                                           ("video", "video.mp4"), ("m4a", "audio.m4a"),
+                                           ("attachment", "media")])
 @pytest.mark.parametrize("ending", ["final", "error", "eof", "marker"])
 async def test_multipart_stream(monkeypatch, media, filename, ending):
     endings = {

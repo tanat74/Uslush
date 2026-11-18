@@ -125,10 +125,8 @@ async def _handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     is_m4a = (media.file_name or "").lower().endswith(".m4a") or mime in {
         "audio/mp4", "audio/m4a", "audio/x-m4a",
     }
-    if not (msg.audio or is_m4a or mime.startswith("audio/")):
-        return
     await _enqueue(update, context, file_id=media.file_id, file_size=media.file_size,
-                   media_type="m4a" if is_m4a else "audio")
+                   media_type="m4a" if is_m4a else "attachment")
 
 
 def register_handlers(
