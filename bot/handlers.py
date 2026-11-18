@@ -1,4 +1,4 @@
-"""Telegram message handlers for voice, video_note and video messages."""
+"""Telegram message handlers for supported media attachments."""
 
 import logging
 
@@ -118,6 +118,19 @@ async def _handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def _handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    media = msg.audio or msg.document
+    mime = (media.mime_type or "").lower()
+    is_m4a = (media.file_name or "").lower().endswith(".m4a") or mime in {
+        "audio/mp4", "audio/m4a", "audio/x-m4a",
+    }
+    if not (msg.audio or is_m4a or mime.startswith("audio/")):
+        return
+    await _enqueue(update, context, file_id=media.file_id, file_size=media.file_size,
+                   media_type="m4a" if is_m4a else "audio")
+
+
 def register_handlers(
     application: Application,
     queue: DeduplicationQueue,
@@ -137,3 +150,4 @@ def register_handlers(
     application.add_handler(MessageHandler(filters.VOICE, _handle_voice))
     application.add_handler(MessageHandler(filters.VIDEO_NOTE, _handle_video_note))
     application.add_handler(MessageHandler(filters.VIDEO, _handle_video))
+    application.add_handler(MessageHandler(filters.AUDIO | filters.Document.ALL, _handle_audio_file))

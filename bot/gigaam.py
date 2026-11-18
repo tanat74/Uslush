@@ -5,7 +5,13 @@ from collections.abc import Callable
 
 import httpx
 
-from bot.asr import AsrUnavailableError, TranscriptionTimeoutError
+
+class AsrUnavailableError(RuntimeError):
+    pass
+
+
+class TranscriptionTimeoutError(RuntimeError):
+    pass
 
 
 class GigaAMClient:
@@ -17,7 +23,13 @@ class GigaAMClient:
 
     async def transcribe(self, audio_bytes: bytes, media_type: str,
                          on_delta: Callable[[str], None]) -> str:
-        name, mime = ("voice.ogg", "audio/ogg") if media_type == "voice" else ("video.mp4", "video/mp4")
+        name, mime = {
+            "voice": ("voice.ogg", "audio/ogg"),
+            "video": ("video.mp4", "video/mp4"),
+            "video_note": ("video.mp4", "video/mp4"),
+            "m4a": ("audio.m4a", "audio/mp4"),
+            "audio": ("audio", "application/octet-stream"),
+        }[media_type]
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(

@@ -8,14 +8,13 @@ from telegram.constants import ChatAction
 from telegram.error import RetryAfter
 
 from bot.queue import DeduplicationQueue, TranscriptionTask
-from bot.whisper import AsrUnavailableError, AudioTooLongError, TranscriptionTimeoutError
+from bot.gigaam import AsrUnavailableError, TranscriptionTimeoutError
 from bot.worker import (
     MSG_EMPTY,
     MSG_START,
     MSG_PARTIAL,
     MSG_ERROR,
     MSG_TIMEOUT,
-    MSG_TOO_LONG,
     MSG_UNAVAILABLE,
     TELEGRAM_MESSAGE_LIMIT,
     run_worker,
@@ -190,28 +189,6 @@ async def test_worker_sends_error_on_transcribe_failure():
     await run_worker_once(queue, whisper, bot)
 
     assert_single_reply(bot, MSG_ERROR)
-
-
-@pytest.mark.asyncio
-async def test_worker_sends_too_long_message_on_long_audio_failure():
-    queue = DeduplicationQueue()
-    task = make_task()
-
-    tg_file = AsyncMock()
-    tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"audio"))
-
-    bot = AsyncMock()
-    bot.get_file = AsyncMock(return_value=tg_file)
-    bot.send_message = AsyncMock()
-    bot.send_chat_action = AsyncMock()
-
-    whisper = AsyncMock()
-    whisper.transcribe = AsyncMock(side_effect=AudioTooLongError("too long"))
-
-    await queue.put(task)
-    await run_worker_once(queue, whisper, bot)
-
-    assert_single_reply(bot, MSG_TOO_LONG)
 
 
 @pytest.mark.asyncio

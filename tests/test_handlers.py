@@ -10,6 +10,7 @@ from bot.handlers import (
     MSG_FILE_TOO_BIG,
     MSG_REPLACED,
     TELEGRAM_DOWNLOAD_LIMIT,
+    _handle_audio_file,
     _handle_video,
     _handle_video_note,
     _handle_voice,
@@ -53,6 +54,28 @@ def make_context(queue: DeduplicationQueue, allowed_user_ids: frozenset[int] = f
     context.bot_data = {"queue": queue, "allowed_user_ids": allowed_user_ids}
     context.bot.send_chat_action = AsyncMock()
     return context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,name,mime,expected", [
+    ("audio", "запись.m4a", "audio/mp4", "m4a"),
+    ("document", "запись.M4A", "application/octet-stream", "m4a"),
+    ("document", None, "audio/x-m4a", "m4a"),
+    ("audio", "запись.mp3", "audio/mpeg", "audio"),
+    ("document", "notes.pdf", "application/pdf", None),
+])
+async def test_audio_attachment(kind, name, mime, expected):
+    queue = DeduplicationQueue()
+    update = make_update(1, 100, "recording", kind)
+    msg = update.effective_message
+    msg.audio = msg.document = None
+    setattr(msg, kind, MagicMock(file_id="recording", file_size=123, file_name=name, mime_type=mime))
+    await _handle_audio_file(update, make_context(queue))
+    if expected:
+        task = await queue.get()
+        assert (task.file_id, task.media_type) == ("recording", expected)
+    else:
+        assert not queue._deque
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ class TranscriptionTask:
     user_id: int
     chat_id: int
     file_id: str
-    media_type: str  # "voice" | "video_note" | "video"
+    media_type: str  # voice, video_note, video, m4a or audio
     message_id: int
 
 

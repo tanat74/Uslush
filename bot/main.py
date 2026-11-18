@@ -17,7 +17,6 @@ from bot.config import load_config
 from bot.handlers import register_handlers
 from bot.gigaam import GigaAMClient
 from bot.queue import DeduplicationQueue
-from bot.whisper import WhisperClient
 from bot.worker import run_worker
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -89,12 +88,8 @@ def main() -> None:
     _install_token_redaction(config.bot_token)
 
     queue = DeduplicationQueue()
-    if config.asr_backend == "gigaam":
-        client = GigaAMClient(config.gigaam_base_url, config.gigaam_model,
-                              config.gigaam_api_key, config.gigaam_timeout)
-    else:
-        client = WhisperClient(config.wyoming_host, config.wyoming_port, config.whisper_language,
-                               ffmpeg_timeout=config.ffmpeg_timeout, wyoming_timeout=config.wyoming_timeout)
+    client = GigaAMClient(config.gigaam_base_url, config.gigaam_model,
+                          config.gigaam_api_key, config.gigaam_timeout)
     worker_task: asyncio.Task | None = None
     heartbeat_task: asyncio.Task | None = None
 

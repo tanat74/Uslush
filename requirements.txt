@@ -1,3 +1,2 @@
 python-telegram-bot[webhooks]==21.3
 httpx==0.28.1
-wyoming==1.10.0

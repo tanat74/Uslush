@@ -3,10 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir -r requirements.txt \
+RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 1000 uslush
 
 COPY bot/ ./bot/

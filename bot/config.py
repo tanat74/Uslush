@@ -17,14 +17,8 @@ class Config:
     bot_mode: str         # BOT_MODE: "polling" | "webhook" (default: "polling")
     webhook_url: str      # WEBHOOK_URL (required when bot_mode="webhook")
     webhook_port: int     # WEBHOOK_PORT (default: 8443)
-    wyoming_host: str     # WYOMING_HOST (required)
-    wyoming_port: int     # WYOMING_PORT (default: 10300)
-    whisper_language: str # WHISPER_LANGUAGE (default: ru)
     poll_interval: float  # POLL_INTERVAL seconds between getUpdates (default: 60)
     allowed_user_ids: frozenset[int]  # ALLOWED_USER_IDS; empty means allow everyone
-    ffmpeg_timeout: float  # FFMPEG_TIMEOUT seconds (default: 120)
-    wyoming_timeout: float  # WYOMING_TIMEOUT seconds (default: 300)
-    asr_backend: str
     gigaam_base_url: str
     gigaam_model: str
     gigaam_api_key: str = field(repr=False)
@@ -106,21 +100,12 @@ def load_config() -> Config:
         _die("WEBHOOK_URL environment variable is required when BOT_MODE=webhook.")
 
     webhook_port = _parse_int("WEBHOOK_PORT", "8443")
-    backend = os.environ.get("ASR_BACKEND", "wyoming").strip()
-    if backend not in {"wyoming", "gigaam"}:
-        _die("ASR_BACKEND must be wyoming or gigaam.")
-    wyoming_host = _require("WYOMING_HOST") if backend == "wyoming" else ""
-    gigaam_url = _require("GIGAAM_BASE_URL") if backend == "gigaam" else ""
-    if gigaam_url and not gigaam_url.startswith(("http://", "https://")):
+    gigaam_url = _require("GIGAAM_BASE_URL")
+    if not gigaam_url.startswith(("http://", "https://")):
         _die("GIGAAM_BASE_URL must start with http:// or https://.")
-    wyoming_port = _parse_int("WYOMING_PORT", "10300")
-    whisper_language = os.environ.get("WHISPER_LANGUAGE", "ru").strip()
     poll_interval = _parse_float("POLL_INTERVAL", "60", minimum=0)
-    ffmpeg_timeout = _parse_float("FFMPEG_TIMEOUT", "120", minimum=0)
-    wyoming_timeout = _parse_float("WYOMING_TIMEOUT", "300", minimum=0)
 
     return Config(
-        asr_backend=backend,
         gigaam_base_url=gigaam_url,
         gigaam_model=os.environ.get("GIGAAM_MODEL", "gigaam-v3-e2e-rnnt"),
         gigaam_api_key=os.environ.get("GIGAAM_API_KEY", "").strip(),
@@ -129,11 +114,6 @@ def load_config() -> Config:
         bot_mode=bot_mode,
         webhook_url=webhook_url,
         webhook_port=webhook_port,
-        wyoming_host=wyoming_host,
-        wyoming_port=wyoming_port,
-        whisper_language=whisper_language,
         poll_interval=poll_interval,
         allowed_user_ids=_parse_allowed_user_ids(),
-        ffmpeg_timeout=ffmpeg_timeout,
-        wyoming_timeout=wyoming_timeout,
     )

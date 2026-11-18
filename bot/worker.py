@@ -7,8 +7,7 @@ from telegram.constants import ChatAction
 from telegram.error import RetryAfter
 
 from bot.queue import DeduplicationQueue, TranscriptionTask
-from bot.asr import AsrUnavailableError, Transcriber, TranscriptionTimeoutError
-from bot.whisper import AudioTooLongError
+from bot.gigaam import AsrUnavailableError, GigaAMClient, TranscriptionTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,6 @@ MSG_START = "Распознаю…"
 MSG_PARTIAL = "Распознавание прервано, показана только часть текста."
 EDIT_INTERVAL = 2.0
 MSG_ERROR = "Ошибка при транскрипции. Попробуйте ещё раз."
-MSG_TOO_LONG = "Файл слишком длинный для распознавания."
 MSG_TIMEOUT = "Распознавание заняло слишком много времени. Попробуйте ещё раз."
 MSG_UNAVAILABLE = "Сервер распознавания недоступен. Попробуйте позже."
 TELEGRAM_MESSAGE_LIMIT = 4096
@@ -134,7 +132,7 @@ class ProgressiveReply:
 
 async def run_worker(
     queue: DeduplicationQueue,
-    client: Transcriber,
+    client: GigaAMClient,
     bot,
 ) -> None:
     """Download, transcribe and progressively publish each queued recording."""
@@ -174,8 +172,6 @@ async def run_worker(
                     logger.warning("Transcription failed for user %s", task.user_id, exc_info=True)
                     if reply.text.strip():
                         result = reply.text + "\n\n" + MSG_PARTIAL
-                    elif isinstance(exc, AudioTooLongError):
-                        result = MSG_TOO_LONG
                     elif isinstance(exc, TranscriptionTimeoutError):
                         result = MSG_TIMEOUT
                     elif isinstance(exc, AsrUnavailableError):
